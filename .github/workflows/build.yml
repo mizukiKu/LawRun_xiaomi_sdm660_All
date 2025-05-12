@@ -1,78 +1,75 @@
-name: Build
-
-on: [push, pull_request]
+name: Build Kernel (4.9 - crDroid)
+on:
+  workflow_dispatch:
+  schedule:
+    # Setiap Sabtu pukul 00:00 UTC
+    - cron: "0 0 * * 6"
+  push:
+    branches:
+      - HEAD
+  pull_request:
+    branches:
+      - HEAD
 
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      ANYKERNEL_PATH: /prebuilt/AnyKernel
-      CLANG_PATH: /prebuilt/clang
-      GCC_PATH: /prebuilt/gcc
-      GCC32_PATH: /prebuilt/gcc32
-      GCC_BRANCH: lineage-18.1
-      CLANG_BRANCH: '11.0'
-      IMAGEDTB_PATH: out/arch/arm64/boot/Image.gz-dtb
-
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_MAXSIZE: "2G"
+      CCACHE_HARDLINK: "true"
+      KERNEL_DEFCONFIG: "whyred_defconfig"
+      KERNEL_CMDLINE: "ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- O=out"
+    
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: "true"
+          fetch-depth: 100
 
-    - name: Setup additional environment variables
-      id: setup_env
-      run: |
-        echo "##[set-output name=output_file;]$(echo Kernel-lavender-$(date +%F))"
-        echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
 
-    - name: Checkout
-      uses: actions/checkout@v2
-      
-    - name: Install build dependencies
-      run: |
-        sudo apt-get update
-        sudo apt install -y ccache
-        sudo bash -c "mkdir /{build,prebuilt} && chown $(whoami):$(whoami) /{build,prebuilt}"
-        git clone --depth=1 -b $CLANG_BRANCH https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-7211189 $CLANG_PATH
-        git clone --depth=1 https://github.com/sfierxyz/AnyKernel3 $ANYKERNEL_PATH
-        git clone --depth=1 -b $GCC_BRANCH https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git $GCC_PATH
-        git clone --depth=1 -b $GCC_BRANCH https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9 $GCC32_PATH
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y 
+          sudo apt install gcc-aarch64-linux-gnu -y
+          sudo apt install gcc-arm-linux-gnueabi -y
+          sudo apt install aria2 binutils make python3 libssl-dev build-essential bc bison flex unzip libssl-dev ca-certificates xz-utils mkbootimg cpio device-tree-compiler git git-lfs -y
+          curl -LSs "https://raw.githubusercontent.com/Vynxid/Kernel_driver_hack/main/kernel/setup.sh" | bash -s Y
+          aria2c -j$(nproc --all) $(curl -fsSL https://raw.githubusercontent.com/Vynxid/Clang/refs/heads/main/Clang-main-link.txt)
+          mkdir zyc-clang
+          tar -xzvf Clang-*.tar.gz -C zyc-clang >> /dev/null
+          git clone https://github.com/osm0sis/AnyKernel3
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
+          sed -i 's!BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!BLOCK=auto;!g' AnyKernel3/anykernel.sh
+          sed -i 's/IS_SLOT_DEVICE=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
+          rm -rf AnyKernel3/.git* AnyKernel3/README.md
+          # mem module
+          curl -LSs "https://raw.githubusercontent.com/Vynxid/Kernel_driver_hack/main/kernel/setup.sh" | bash -s M vinn
+
+      - name: GetTime
+        id: get_time
+        run: |
+          echo "TIME=$(TZ=UTC+3 date +%s )" >> $GITHUB_OUTPUT
+
+      - name: Build Kernel-With-KernelSU
+        run: |
+          export PATH=$(pwd)/zyc-clang/bin/:$PATH
+          make $KERNEL_CMDLINE $KERNEL_DEFCONFIG CC="ccache clang"
+          make $KERNEL_CMDLINE CC="ccache clang" -j$(nproc --all)
+          cp out/arch/arm64/boot/Image.gz AnyKernel3
+
+      - name: Upload Kernel-SU
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nyan_kernel-KSU-${{ steps.get_time.outputs.TIME }}
+          path: "AnyKernel3/*"
     
-    - name: Restore cache
-      uses: pat-s/always-upload-cache@v2.1.3
-      with:
-        path: |
-          ~/.ccache
-        key: ${{ runner.os }}-ccache-${{ steps.setup_env.outputs.branch }}
-        restore-keys: |
-          ${{ runner.os }}-ccache-
-
-    - name: Build
-      run: |
-        export PATH="$CLANG_PATH/bin:$GCC_PATH/bin:$GCC32_PATH/bin:$PATH"
-        export LD_LIBRARY_PATH="$CLANG_PATH/lib64:$LD_LIBRARY_PATH"
-        make O=out ARCH=arm64 clean
-        make O=out ARCH=arm64 lavender_defconfig
-        make -j$(nproc --all) O=out \
-          ARCH=arm64 \
-          CC="ccache clang" \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-android- \
-          CROSS_COMPILE_ARM32=arm-linux-androideabi-
-
-    - name: Archive
-      run: |
-        cd $ANYKERNEL_PATH
-        mv $GITHUB_WORKSPACE/$IMAGEDTB_PATH .
-        zip -r9 $GITHUB_WORKSPACE/${{ steps.setup_env.outputs.output_file }}.zip *
-
-    - name: Upload Artifacts
-      uses: actions/upload-artifact@v2
-      with:
-        path: ${{ steps.setup_env.outputs.output_file }}.zip
-        name: ${{ steps.setup_env.outputs.output_file }}.zip
-    
-    - name: Upload binaries to release
-      if: startsWith(github.ref, 'refs/tag/v')
-      uses: svenstaro/upload-release-action@v2
-      with:
-        repo_token: ${{ secrets.GITHUB_TOKEN }}
-        file: ${{ steps.setup_env.outputs.output_file }}.zip
-        tag: ${{ github.ref }}
+      - name: Upload mem module
+        uses: actions/upload-artifact@v4
+        with:
+          name: memodule
+          path: "./out/drivers/memkernel/vinn_memk.ko"
