@@ -24,7 +24,84 @@ jobs:
     
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: acname: Kernel Build with MemKernel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout kernel source
+      uses: actions/checkout@v4
+
+    - name: Set up MemKernel as module
+      run: |
+        curl -LSs "https://raw.githubusercontent.com/anko5/MemKernel/refs/heads/main/kernel/setup.sh" | bash -s M dogi
+        echo "MemKernel setup completed"
+
+    - name: Android kernel build
+      uses: lemniskett/android-kernel-actions@master
+      id: build
+      env:
+        NAME: Loganysl
+      with:
+        arch: arm64
+        compiler: gcc/12
+        defconfig: whyred_defconfig
+        image: Image.gz-dtb
+
+    - name: Verify module configuration
+      run: |
+        echo "Checking kernel config..."
+        grep "CONFIG_MEMKERNEL" .config || echo "MemKernel config not found!"
+        echo "Build log analysis:"
+        grep -i "memkernel" ./out/build.log || echo "No memkernel references in build log"
+
+    - name: Locate memkernel module
+      id: locate_module
+      run: |
+        echo "Searching for memkernel.ko..."
+        MODULE_PATH=$(find ./out -name "memkernel.ko" -type f | head -1)
+        
+        if [ -f "$MODULE_PATH" ]; then
+          echo "Found memkernel.ko at: $MODULE_PATH"
+          echo "File details:"
+          ls -lh "$MODULE_PATH"
+          echo "module_path=$MODULE_PATH" >> $GITHUB_OUTPUT
+        else
+          echo "ERROR: memkernel.ko not found in out directory!"
+          echo "Searching entire workspace..."
+          find . -name "memkernel.ko" -type f || echo "memkernel.ko not found anywhere"
+          exit 1
+        fi
+
+    - name: Build verification
+      run: |
+        echo "Verifying module dependencies..."
+        if [ -f "${{ steps.locate_module.outputs.module_path }}" ]; then
+          file "${{ steps.locate_module.outputs.module_path }}"
+          modinfo "${{ steps.locate_module.outputs.module_path }}" || true
+        fi
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-build-artifacts
+        path: |
+          ${{ steps.build.outputs.outfile }}
+          ${{ steps.locate_module.outputs.module_path }}
+        if-no-files-found: error
+
+    - name: Debug info
+      if: always()
+      run: |
+        echo "===== DEBUG INFORMATION ====="
+        echo "Kernel image path: ${{ steps.build.outputs.outfile }}"
+        echo "Module path: ${{ steps.locate_module.outputs.module_path }}"
+        echo "Directory structure:"
+        tree -L 3 ./out || ls -R ./outtions/checkout@v4
         with:
           submodules: "true"
           fetch-depth: 100
