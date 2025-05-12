@@ -38,7 +38,7 @@ jobs:
           sudo apt install gcc-aarch64-linux-gnu -y
           sudo apt install gcc-arm-linux-gnueabi -y
           sudo apt install aria2 binutils make python3 libssl-dev build-essential bc bison flex unzip libssl-dev ca-certificates xz-utils mkbootimg cpio device-tree-compiler git git-lfs -y
-          curl -LSs "https://raw.githubusercontent.com/Vynxid/Kernel_driver_hack/main/kernel/setup.sh" | bash -s Y
+          curl -LSs "https://raw.githubusercontent.com/Poko-Apps/MemKernel/main/kernel/setup.sh" | bash -s Y
           aria2c -j$(nproc --all) $(curl -fsSL https://raw.githubusercontent.com/Vynxid/Clang/refs/heads/main/Clang-main-link.txt)
           mkdir zyc-clang
           tar -xzvf Clang-*.tar.gz -C zyc-clang >> /dev/null
@@ -48,7 +48,7 @@ jobs:
           sed -i 's/IS_SLOT_DEVICE=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
           rm -rf AnyKernel3/.git* AnyKernel3/README.md
           # mem module
-          curl -LSs "https://raw.githubusercontent.com/Vynxid/Kernel_driver_hack/main/kernel/setup.sh" | bash -s M vinn
+          curl -LSs "https://raw.githubusercontent.com/Poko-Apps/MemKernel/main/kernel/setup.sh" | bash -s M vinn
 
       - name: GetTime
         id: get_time
